@@ -263,12 +263,12 @@ public class WebSocketService implements Web3jService {
     void onWebSocketMessage(String messageStr) throws IOException {
         JsonNode replyJson = parseToTree(messageStr);
 
-        if (isReply(replyJson)) {
+        if (isSubscriptionEvent(replyJson)) {
+            processSubscriptionEvent(messageStr, replyJson);
+        } else if (isReply(replyJson)) {
             processRequestReply(messageStr, replyJson);
         } else if (isBatchReply(replyJson)) {
             processBatchRequestReply(messageStr, (ArrayNode) replyJson);
-        } else if (isSubscriptionEvent(replyJson)) {
-            processSubscriptionEvent(messageStr, replyJson);
         } else {
             throw new IOException("Unknown message type");
         }
