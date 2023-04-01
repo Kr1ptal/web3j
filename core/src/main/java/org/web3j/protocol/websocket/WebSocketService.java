@@ -182,7 +182,7 @@ public class WebSocketService implements Web3jService {
                                     Thread.sleep(webSocketClient.getConnectionLostTimeout() * 1000L);
                                     connectToWebSocket();
                                 } catch (InterruptedException | ConnectException e) {
-                                    e.printStackTrace();
+                                    log.error("Received error when resubscribing", e);
                                 }
 
                             }).start();
