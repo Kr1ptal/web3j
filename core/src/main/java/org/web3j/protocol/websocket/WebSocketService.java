@@ -108,12 +108,12 @@ public class WebSocketService implements Web3jService {
      *
      * @throws ConnectException thrown if failed to connect to the server via WebSocket protocol
      */
-    public void connect() throws ConnectException {
+    public void connect() throws IOException {
         connect(s -> {}, t -> {}, () -> {});
     }
 
     public void connect(Consumer<String> onMessage, Consumer<Throwable> onError, Runnable onClose)
-            throws ConnectException {
+            throws IOException {
         try {
             connectToWebSocket();
             setWebSocketListener(onMessage, onError, onClose);
@@ -123,7 +123,7 @@ public class WebSocketService implements Web3jService {
         }
     }
 
-    private void connectToWebSocket() throws InterruptedException, ConnectException {
+    private void connectToWebSocket() throws InterruptedException, IOException {
         boolean connected =
                 shouldReConnect
                         ? webSocketClient.reconnectBlocking()
@@ -141,17 +141,14 @@ public class WebSocketService implements Web3jService {
 
         // re-subscribe also to in-flight requests
         toResubscribe.addAll(subscriptionRequestForId.values());
-        subscriptionRequestForId.clear();
 
-        toResubscribe.forEach((sub) -> {
-            subscriptionRequestForId.put(sub.getRequest().getId(), sub);
-            try {
-                send(sub.getRequest(), EthSubscribe.class);
-            } catch (IOException e) {
-                log.error("Failed to re-subscribe to RPC events with request id {}", sub.getRequest().getId());
-                sub.getSubject().onError(e);
-            }
-        });
+        // first, re-add all requests
+        toResubscribe.forEach((sub) -> subscriptionRequestForId.put(sub.getRequest().getId(), sub));
+
+        // second, try to subscribe. Even if this step fails, we will have all requests marked as in-flight for next retry
+        for (WebSocketSubscription<?> sub : toResubscribe) {
+            send(sub.getRequest(), EthSubscribe.class);
+        }
     }
 
     private void setWebSocketListener(
@@ -181,7 +178,7 @@ public class WebSocketService implements Web3jService {
                                 try {
                                     Thread.sleep(webSocketClient.getConnectionLostTimeout() * 1000L);
                                     connectToWebSocket();
-                                } catch (InterruptedException | ConnectException e) {
+                                } catch (InterruptedException | IOException e) {
                                     log.error("Received error when resubscribing", e);
                                 }
 
