@@ -27,7 +27,10 @@ public class TransactionDecoder {
     private static final int UNSIGNED_EIP1559TX_RLP_LIST_SIZE = 9;
 
     public static RawTransaction decode(final String hexTransaction) {
-        final byte[] transaction = Numeric.hexStringToByteArray(hexTransaction);
+        return decode(Numeric.hexStringToByteArray(hexTransaction));
+    }
+
+    public static RawTransaction decode(final byte[] transaction) {
         if (getTransactionType(transaction) == TransactionType.ACCESS_LIST) {
             return decodeAccessListTransaction(transaction);
         }
