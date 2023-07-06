@@ -71,6 +71,7 @@ public class WebSocketService implements Web3jService {
     // WebSocket client
     private final WebSocketClient webSocketClient;
     private boolean shouldReConnect;
+    private boolean isManuallyClosed;
     // Executor to schedule request timeouts
     private final ScheduledExecutorService executor;
     // Object mapper to map incoming JSON objects
@@ -107,12 +108,12 @@ public class WebSocketService implements Web3jService {
      *
      * @throws ConnectException thrown if failed to connect to the server via WebSocket protocol
      */
-    public void connect() throws ConnectException {
+    public void connect() throws IOException {
         connect(s -> {}, t -> {}, () -> {});
     }
 
     public void connect(Consumer<String> onMessage, Consumer<Throwable> onError, Runnable onClose)
-            throws ConnectException {
+            throws IOException {
         try {
             connectToWebSocket();
             setWebSocketListener(onMessage, onError, onClose);
@@ -122,7 +123,7 @@ public class WebSocketService implements Web3jService {
         }
     }
 
-    private void connectToWebSocket() throws InterruptedException, ConnectException {
+    private void connectToWebSocket() throws InterruptedException, IOException {
         boolean connected =
                 shouldReConnect
                         ? webSocketClient.reconnectBlocking()
@@ -131,6 +132,22 @@ public class WebSocketService implements Web3jService {
         shouldReConnect = true;
         if (!connected) {
             throw new ConnectException("Failed to connect to WebSocket");
+        }
+
+        // we're connected - resubscribe to events by re-using existing receivers but creating a new subscription
+        List<WebSocketSubscription<?>> toResubscribe = new ArrayList<>(subscriptionForId.size());
+        toResubscribe.addAll(subscriptionForId.values());
+        subscriptionForId.clear();
+
+        // re-subscribe also to in-flight requests
+        toResubscribe.addAll(subscriptionRequestForId.values());
+
+        // first, re-add all requests
+        toResubscribe.forEach((sub) -> subscriptionRequestForId.put(sub.getRequest().getId(), sub));
+
+        // second, try to subscribe. Even if this step fails, we will have all requests marked as in-flight for next retry
+        for (WebSocketSubscription<?> sub : toResubscribe) {
+            send(sub.getRequest(), EthSubscribe.class);
         }
     }
 
@@ -152,8 +169,25 @@ public class WebSocketService implements Web3jService {
 
                     @Override
                     public void onClose() {
-                        onWebSocketClose();
-                        onClose.run();
+                        if (!isManuallyClosed) {
+                            // clear only requests - subscriptions need to be kept to resubscribe
+                            closeOutstandingRequests();
+
+                            // need to reconnect on a different thread
+                            new Thread(() -> {
+                                try {
+                                    Thread.sleep(webSocketClient.getConnectionLostTimeout() * 1000L);
+                                    connectToWebSocket();
+                                } catch (InterruptedException | IOException e) {
+                                    log.error("Received error when resubscribing", e);
+                                }
+
+                            }).start();
+
+                        } else {
+                            onWebSocketClose();
+                            onClose.run();
+                        }
                     }
                 });
     }
@@ -263,12 +297,12 @@ public class WebSocketService implements Web3jService {
     void onWebSocketMessage(String messageStr) throws IOException {
         JsonNode replyJson = parseToTree(messageStr);
 
-        if (isReply(replyJson)) {
+        if (isSubscriptionEvent(replyJson)) {
+            processSubscriptionEvent(messageStr, replyJson);
+        } else if (isReply(replyJson)) {
             processRequestReply(messageStr, replyJson);
         } else if (isBatchReply(replyJson)) {
             processBatchRequestReply(messageStr, (ArrayNode) replyJson);
-        } else if (isSubscriptionEvent(replyJson)) {
-            processSubscriptionEvent(messageStr, replyJson);
         } else {
             throw new IOException("Unknown message type");
         }
@@ -317,26 +351,23 @@ public class WebSocketService implements Web3jService {
 
     @SuppressWarnings("unchecked")
     private void processSubscriptionResponse(long replyId, EthSubscribe reply) throws IOException {
-        WebSocketSubscription subscription = subscriptionRequestForId.get(replyId);
-        processSubscriptionResponse(
-                reply, subscription.getSubject(), subscription.getResponseType());
+        WebSocketSubscription subscription = subscriptionRequestForId.remove(replyId);
+        processSubscriptionResponse(reply, subscription);
     }
 
     private <T extends Notification<?>> void processSubscriptionResponse(
-            EthSubscribe subscriptionReply, BehaviorSubject<T> subject, Class<T> responseType) {
+            EthSubscribe subscriptionReply, WebSocketSubscription subscription) {
         if (!subscriptionReply.hasError()) {
-            establishSubscription(subject, responseType, subscriptionReply);
+            establishSubscription(subscription, subscriptionReply);
         } else {
-            reportSubscriptionError(subject, subscriptionReply);
+            reportSubscriptionError(subscription.getSubject(), subscriptionReply);
         }
     }
 
     private <T extends Notification<?>> void establishSubscription(
-            BehaviorSubject<T> subject, Class<T> responseType, EthSubscribe subscriptionReply) {
+            WebSocketSubscription subscription, EthSubscribe subscriptionReply) {
         log.debug("Subscribed to RPC events with id {}", subscriptionReply.getSubscriptionId());
-        subscriptionForId.put(
-                subscriptionReply.getSubscriptionId(),
-                new WebSocketSubscription<>(subject, responseType));
+        subscriptionForId.put(subscriptionReply.getSubscriptionId(), subscription);
     }
 
     private <T extends Notification<?>> String getSubscriptionId(BehaviorSubject<T> subject) {
@@ -481,7 +512,7 @@ public class WebSocketService implements Web3jService {
             Request request, BehaviorSubject<T> subject, Class<T> responseType) {
 
         subscriptionRequestForId.put(
-                request.getId(), new WebSocketSubscription<>(subject, responseType));
+                request.getId(), new WebSocketSubscription<>(request, subject, responseType));
         try {
             send(request, EthSubscribe.class);
         } catch (IOException e) {
@@ -528,6 +559,7 @@ public class WebSocketService implements Web3jService {
 
     @Override
     public void close() {
+        isManuallyClosed = true;
         webSocketClient.close();
         executor.shutdown();
     }

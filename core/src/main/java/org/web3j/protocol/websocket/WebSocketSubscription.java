@@ -13,6 +13,7 @@
 package org.web3j.protocol.websocket;
 
 import io.reactivex.subjects.BehaviorSubject;
+import org.web3j.protocol.core.Request;
 
 /**
  * Objects necessary to process a new item received via a WebSocket subscription.
@@ -20,6 +21,7 @@ import io.reactivex.subjects.BehaviorSubject;
  * @param <T> type of a data item that should be returned by a WebSocket subscription.
  */
 public class WebSocketSubscription<T> {
+    private Request request;
     private BehaviorSubject<T> subject;
     private Class<T> responseType;
 
@@ -29,9 +31,14 @@ public class WebSocketSubscription<T> {
      * @param subject used to send new data items to listeners
      * @param responseType type of a data item returned by a WebSocket subscription
      */
-    public WebSocketSubscription(BehaviorSubject<T> subject, Class<T> responseType) {
+    public WebSocketSubscription(Request request, BehaviorSubject<T> subject, Class<T> responseType) {
+        this.request = request;
         this.subject = subject;
         this.responseType = responseType;
+    }
+
+    public Request getRequest() {
+        return request;
     }
 
     public BehaviorSubject<T> getSubject() {

@@ -13,9 +13,10 @@
 package org.web3j.protocol.core.methods.request;
 
 import java.math.BigInteger;
+import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-
+import org.web3j.crypto.transaction.type.AccessListObject;
 import org.web3j.utils.Numeric;
 
 /**
@@ -42,6 +43,7 @@ public class Transaction {
     private Long chainId;
     private BigInteger maxPriorityFeePerGas;
     private BigInteger maxFeePerGas;
+    private List<AccessListObject> accessList;
 
     public Transaction(
             String from,
@@ -51,7 +53,19 @@ public class Transaction {
             String to,
             BigInteger value,
             String data) {
-        this(from, nonce, gasPrice, gasLimit, to, value, data, null, null, null);
+        this(from, nonce, gasPrice, gasLimit, to, value, data, null, null, null, null);
+    }
+
+    public Transaction(
+            String from,
+            BigInteger nonce,
+            BigInteger gasPrice,
+            BigInteger gasLimit,
+            String to,
+            BigInteger value,
+            String data,
+            List<AccessListObject> accessList) {
+        this(from, nonce, gasPrice, gasLimit, to, value, data, null, null, null, accessList);
     }
 
     public Transaction(
@@ -65,6 +79,21 @@ public class Transaction {
             Long chainId,
             BigInteger maxPriorityFeePerGas,
             BigInteger maxFeePerGas) {
+        this(from, nonce, gasPrice, gasLimit, to, value, data, chainId, maxPriorityFeePerGas, maxFeePerGas, null);
+    }
+
+    public Transaction(
+            String from,
+            BigInteger nonce,
+            BigInteger gasPrice,
+            BigInteger gasLimit,
+            String to,
+            BigInteger value,
+            String data,
+            Long chainId,
+            BigInteger maxPriorityFeePerGas,
+            BigInteger maxFeePerGas,
+            List<AccessListObject> accessList) {
         this.chainId = chainId;
         this.from = from;
         this.to = to;
@@ -79,6 +108,7 @@ public class Transaction {
         this.nonce = nonce;
         this.maxPriorityFeePerGas = maxPriorityFeePerGas;
         this.maxFeePerGas = maxFeePerGas;
+        this.accessList = accessList;
     }
 
     public static Transaction createContractTransaction(
@@ -185,6 +215,10 @@ public class Transaction {
 
     public String getMaxFeePerGas() {
         return convert(maxFeePerGas);
+    }
+
+    public List<AccessListObject> getAccessList() {
+        return accessList;
     }
 
     private static String convert(BigInteger value) {
